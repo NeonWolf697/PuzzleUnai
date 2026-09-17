@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Unai Puzzle</title>
+<style>
+    :root {
+        --primary-color: #6200ea;
+        --primary-light: #bb86fc;
+        --bg-color: #f3e5f5;
+        --card-bg: #ffffff;
+        --text-color: #4a148c;
+        --accent-color: #ff4081;
+        --success-color: #00e676;
+        --border-radius: 12px;
+        --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        --transition: all 0.3s ease;
+        --font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+        font-family: var(--font-family);
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+        padding: 20px;
+        overflow-x: hidden;
+        padding-bottom: 100px; /* Space for antistress msg */
+    }
+
+    h1 {
+        margin-bottom: 20px;
+        color: var(--primary-color);
+        text-align: center;
+        font-size: 1.5rem;
+    }
+
+    #game-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+        max-width: 450px;
+        position: relative;
+    }
+
+    /* Puzzle Board */
+    #puzzle-board {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        background-color: var(--card-bg);
+        border-radius: var(--border-radius);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        position: relative;
+        margin-bottom: 20px;
+        transition: var(--transition);
+        transform: translateZ(0); /* GPU accel */
+    }
+
+    #puzzle-board.completed {
+        box-shadow: 0 0 25px var(--success-color);
+        background-color: transparent; /* Hide grid lines */
+    }
+
+    .piece {
+        width: 100%;
+        height: 100%;
+        cursor: grab;
+        transition: transform 0.3s ease, box-shadow 0.3s ease, opacity 0.3s ease;
+        position: relative;
+        transform-style: preserve-3d; /* Important for 3D flip */
+    }
+
+    .piece.dragging {
+        opacity: 0.5;
+        cursor: grabbing;
+        z-index: 10;
+    }
+
+    .piece.selected {
+        border: 2px solid var(--accent-color);
+        box-shadow: 0 0 15px var(--accent-color);
+        z-index: 5;
+        animation: pulse 1.5s infinite;
+    }
+
+    .piece.over {
+        border-color: var(--primary-light);
+        background-color: rgba(187, 134, 252, 0.2);
+    }
+
+    /* Flip Animation state */
+    .piece.flipping {
+        pointer-events: none;
+    }
+
+    .piece-inner {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        transition: transform 0.8s cubic-bezier(0.4, 0.2, 0.2, 1);
+        transform-style: preserve-3d;
+    }
+
+    .piece.flipped .piece-inner {
+        transform: rotateY(180deg);
+    }
+
+    .piece-front, .piece-back {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
+        overflow: hidden;
+        border-radius: 1px; /* tiny radius to avoid sharp corners during flip */
+    }
+
+    .piece-front {
+        background-size: 800% 800%;
+    }
+
+    .piece-back {
+        transform: rotateY(180deg);
+        background-color: #fff;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 2px;
+        box-sizing: border-box;
+    }
+
+    /* Text layout on backs */
+    .text-block {
+        font-size: 5px; /* Very small during flip */
+        line-height: 1.2;
+        text-align: center;
+        font-weight: bold;
+        color: var(--text-color);
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+        justify-content: center;
+        align-items: center;
+        transition: font-size 0.3s ease; /* Smooth resize after flip */
+    }
+
+    /* State when cascade finishes - text becomes readable grid */
+    #puzzle-board.text-mode .piece-back {
+        display: flex; /* Override default to show text block */
+    }
+
+    #puzzle-board.text-mode .text-block {
+        font-size: 6px; /* Slightly larger for final read, computed dynamically in JS */
+        position: absolute;
+        top: 0; left: 0;
+        /* This ensures text fills the 8x8 grid visually */
+        width: 800%;
+        height: 800%;
+    }
+
+    /* Loading/Error State */
+    #loading-overlay {
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background: var(--card-bg);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 20;
+        color: var(--accent-color);
+        font-weight: bold;
+        text-align: center;
+        padding: 20px;
+        border-radius: var(--border-radius);
+    }
+
+    #victory-message {
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0, 230, 118, 0.9);
+        color: white;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 15;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.5s ease;
+        font-size: 1.5rem;
+        font-weight: bold;
+        border-radius: var(--border-radius);
+    }
+
+    #victory-message.show {
+        opacity: 1;
+    }
+
+    /* Controls */
+    #controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+        width: 100%;
+        max-width: 450px;
+        margin-bottom: 20px;
+    }
+
+    button {
+        padding: 10px 20px;
+        font-size: 0.9rem;
+        font-family: var(--font-family);
+        border: none;
+        border-radius: 30px;
+        cursor: pointer;
+        transition: var(--transition);
+        background-color: var(--card-bg);
+        color: var(--primary-color);
+        box-shadow: var(--shadow);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    button:hover:not(:disabled) {
+        background-color: var(--bg-color);
+        transform: translateY(-2px);
+    }
+
+    button:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: 0 2px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    button.primary {
+        background-color: var(--primary-color);
+        color: white;
+    }
+
+    button.primary:hover {
+        background-color: #512da8;
+    }
+
+    #sound-toggle {
+        min-width: 120px;
+        justify-content: center;
+    }
+
+    /* Antistress Section */
+    #antistress-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        margin-top: 10px;
+        width: 100%;
+        max-width: 450px;
+    }
+
+    #duck-head {
+        font-size: 2.5rem;
+        margin-bottom: -15px;
+        z-index: 1;
+        transition: transform 0.1s ease;
+        filter: drop-shadow(0 2px 2px rgba(0,0,0,0.2));
+    }
+
+    #antistress-btn {
+        width: 100%;
+        padding: 15px;
+        font-size: 1.1rem;
+        background-color: #fff9c4;
+        color: #fbc02d;
+        font-weight: bold;
+        border: 3px solid #fbc02d;
+        border-radius: var(--border-radius);
+        box-shadow: 0 6px 0 #f9a825;
+    }
+
+    #antistress-btn:active {
+        transform: translateY(4px);
+        box-shadow: 0 2px 0 #f9a825;
+    }
+
+    #antistress-btn.pressed #duck-head {
+        transform: translateY(5px) rotate(10deg);
+    }
+
+    #cuacs-counter {
+        font-size: 0.85rem;
+        color: var(--text-color);
+        margin-top: 5px;
+        min-height: 1.2em;
+        font-weight: 500;
+    }
+
+    #antistress-msg {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%) translateY(60px);
+        background: rgba(0,0,0,0.85);
+        color: white;
+        padding: 12px 24px;
+        border-radius: 30px;
+        font-size: 0.95rem;
+        pointer-events: none;
+        opacity: 0;
+        transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s ease;
+        z-index: 100;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    }
+
+    #antistress-msg.show {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+
+    /* Animations */
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(255, 64, 129, 0.5); }
+        70% { box-shadow: 0 0 0 10px rgba(255, 64, 129, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(255, 64, 129, 0); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        * { animation: none !important; transition: none !important; }
+        .piece-inner { transition: none !important; }
+    }
+
+    @media (max-width: 360px) {
+        h1 { font-size: 1.3rem; }
+        button { padding: 8px 16px; font-size: 0.8rem; }
+        #antistress-btn { padding: 12px; font-size: 1rem; }
+        #duck-head { font-size: 2rem; margin-bottom: -12px; }
+    }
+</style>
+</head>
+<body>
+
+    <h1>¡Arma el puzzle de Unai!</h1>
+
+    <div id="game-container">
+        <div id="puzzle-board">
+            <div id="loading-overlay">
+                Cargando "Unai.png"...<br><br>
+                Asegúrate de que el archivo esté en la misma carpeta que index.html
+                y que se llame exactamente "Unai.png" (mayúsculas importan).
+            </div>
+            <div id="victory-message">
+                ¡Lo has conseguido!
+            </div>
+        </div>
+
+        <div id="controls">
+            <button id="shuffle-btn" class="primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-1.41-8.58M8 16l2 2-2 2"/><path d="M16 8a10 10 0 0 1-1.41 8.58" transform="translate(2.5 2)"/></svg>
+                Mezclar puzzle
+            </button>
+            <button id="reset-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                Reiniciar
+            </button>
+            <button id="sound-toggle">
